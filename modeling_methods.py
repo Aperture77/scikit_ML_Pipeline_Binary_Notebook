@@ -32,7 +32,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import balanced_accuracy_score
 from sklearn.metrics import recall_score
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, multilabel_confusion_matrix
 from sklearn.metrics import precision_score
 from sklearn.metrics import f1_score
 from sklearn.metrics import roc_curve, auc, precision_recall_curve
@@ -50,13 +50,14 @@ from tqdm import tnrange, tqdm_notebook
 
 def classEval(y_true, y_pred, verbose = False):
 	#calculate and store evaluation metrics
-	tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+	list_confusion_array = multilabel_confusion_matrix(y_true, y_pred)
+	tn, fp, fn, tp = sum(list_confusion_array).ravel()
 
 	ac = accuracy_score(y_true, y_pred)
 	bac = balanced_accuracy_score(y_true, y_pred)
-	re = recall_score(y_true, y_pred)
-	pr = precision_score(y_true, y_pred)
-	f1 = f1_score(y_true, y_pred)
+	re = recall_score(y_true, y_pred, average="micro")
+	pr = precision_score(y_true, y_pred, average="micro")
+	f1 = f1_score(y_true, y_pred, average="micro")
 
 	#calculate specificity
 	if tn == 0 and fp == 0:
