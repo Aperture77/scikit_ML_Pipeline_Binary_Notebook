@@ -109,7 +109,7 @@ def save_FI(FI_all, algorithm,data_name,globalFeatureList,output_folder):
 	dr.to_csv(filepath, header=globalFeatureList, index=False)
 
 
-def eval_Algorithm_FI(algorithm,ordered_feature_names,xTrainList,yTrainList,xTestList,yTestList,cv_partitions,global_ordered_features,wd_path,output_folder,data_name,randSeed,param_grid,model_folder,algColor,hype_cv,n_trials,scoring_metric,timeout):
+def eval_Algorithm_FI(algorithm,ordered_feature_names,xTrainList,yTrainList,xTestList,yTestList,n_classes, cv_partitions,global_ordered_features,wd_path,output_folder,data_name,randSeed,param_grid,model_folder,algColor,hype_cv,n_trials,scoring_metric,timeout):
 	alg_result_table = []
 	#Define evaluation stats variable lists
 	s_bac = []
@@ -143,7 +143,7 @@ def eval_Algorithm_FI(algorithm,ordered_feature_names,xTrainList,yTrainList,xTes
 		#Algorithm Specific Code
 		print("Running "+str(algorithm))
 		if algorithm == 'logistic_regression':
-			metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi = run_LR_full(xTrainList[i], yTrainList[i], xTestList[i], yTestList[i],randSeed,i,param_grid[algorithm],name_path,hype_cv,n_trials,scoring_metric,timeout,wd_path,output_folder,algorithm,data_name)
+			metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi = run_LR_full(xTrainList[i], yTrainList[i], xTestList[i], yTestList[i],n_classes,randSeed,i,param_grid[algorithm],name_path,hype_cv,n_trials,scoring_metric,timeout,wd_path,output_folder,algorithm,data_name)
 		elif algorithm == 'decision_tree':
 			metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi = run_DT_full(xTrainList[i], yTrainList[i], xTestList[i], yTestList[i],randSeed,i,param_grid[algorithm],name_path,hype_cv,n_trials,scoring_metric,timeout,wd_path,output_folder,algorithm,data_name)
 		elif algorithm == 'random_forest':
@@ -386,7 +386,7 @@ def objective_LR(trial, est, x_train, y_train, randSeed, hype_cv, param_grid, sc
 	return hyper_eval(est, x_train, y_train, randSeed, hype_cv, params, scoring_metric)
 
 	
-def run_LR_full(x_train, y_train, x_test, y_test, randSeed, i, param_grid, name_path, hype_cv, n_trials, scoring_metric,timeout,wd_path,output_folder,algorithm,data_name):
+def run_LR_full(x_train, y_train, x_test, y_test, n_classes, randSeed, i, param_grid, name_path, hype_cv, n_trials, scoring_metric,timeout,wd_path,output_folder,algorithm,data_name):
 	#Run Hyperparameter sweep
 	est = LogisticRegression()
 	sampler = optuna.samplers.TPESampler(seed=randSeed)  # Make the sampler behave in a deterministic way.
@@ -424,7 +424,17 @@ def run_LR_full(x_train, y_train, x_test, y_test, randSeed, i, param_grid, name_
 	probas_ = model.predict_proba(x_test)
 
 	# Compute ROC curve and AUC
-	fpr, tpr, thresholds = metrics.roc_curve(y_test, probas_[:, 1])
+	fpr_dict = dict()
+	tpr_dict = dict()
+	roc_auc_dict = dict()
+	thresholds_dict = dict()
+	for i in range(n_classes):
+		fpr_dict[i], tpr_dict[i], thresholds_dict[i] = metrics.roc_curve(y_test, probas_[:, 1], pos_label=i)
+		roc_auc_dict[i] = auc(fpr_dict[i], tpr_dict[i])
+	print(fpr_dict)
+	print(tpr_dict)
+	print(roc_auc_dict)
+	fpr, tpr, thresholds = "todo","todo","todo"
 	roc_auc = auc(fpr, tpr)
 
 	# Compute Precision/Recall curve and AUC
