@@ -19,6 +19,7 @@ from sklearn.base import clone
 #import sklearn.model_selection
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import label_binarize
 from sklearn import tree
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
@@ -109,7 +110,7 @@ def save_FI(FI_all, algorithm,data_name,globalFeatureList,output_folder):
 	dr.to_csv(filepath, header=globalFeatureList, index=False)
 
 
-def eval_Algorithm_FI(algorithm,ordered_feature_names,xTrainList,yTrainList,xTestList,yTestList,n_classes, cv_partitions,global_ordered_features,wd_path,output_folder,data_name,randSeed,param_grid,model_folder,algColor,hype_cv,n_trials,scoring_metric,timeout):
+def eval_Algorithm_FI(algorithm,ordered_feature_names,xTrainList,yTrainList,xTestList,yTestList, cv_partitions,global_ordered_features,wd_path,output_folder,data_name,randSeed,param_grid,model_folder,algColor,hype_cv,n_trials,scoring_metric,timeout, type_average):
 	alg_result_table = []
 	#Define evaluation stats variable lists
 	s_bac = []
@@ -143,7 +144,7 @@ def eval_Algorithm_FI(algorithm,ordered_feature_names,xTrainList,yTrainList,xTes
 		#Algorithm Specific Code
 		print("Running "+str(algorithm))
 		if algorithm == 'logistic_regression':
-			metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi = run_LR_full(xTrainList[i], yTrainList[i], xTestList[i], yTestList[i],n_classes,randSeed,i,param_grid[algorithm],name_path,hype_cv,n_trials,scoring_metric,timeout,wd_path,output_folder,algorithm,data_name)
+			metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi = run_LR_full(xTrainList[i], yTrainList[i], xTestList[i], yTestList[i],randSeed,i,param_grid[algorithm],name_path,hype_cv,n_trials,scoring_metric,timeout,wd_path,output_folder,algorithm,data_name, type_average)
 		elif algorithm == 'decision_tree':
 			metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi = run_DT_full(xTrainList[i], yTrainList[i], xTestList[i], yTestList[i],randSeed,i,param_grid[algorithm],name_path,hype_cv,n_trials,scoring_metric,timeout,wd_path,output_folder,algorithm,data_name)
 		elif algorithm == 'random_forest':
@@ -363,6 +364,85 @@ def intersection(lst1, lst2):
 	lst3 = [value for value in lst1 if value in lst2]
 	return lst3
 
+def score_micro_average(y, y_pred, classes, n_classes):
+	"""
+	Compute the micro average scores for the ROCAUC curves.
+	"""
+
+	# Convert y to binarized array for micro and macro scores
+	y = label_binarize(y, classes=classes)
+	if n_classes == 2:
+		y = np.hstack((1 - y, y))
+
+	# Compute micro-average
+	fpr, tpr, _ = roc_curve(y.ravel(), y_pred.ravel())
+	roc_auc = auc(fpr, tpr)
+	return fpr, tpr, roc_auc
+
+def score_macro_average(n_classes, fpr_dict, tpr_dict):
+	"""
+	Compute the macro average scores for the ROCAUC curves.
+	"""
+	fpr = []
+	tpr = []
+	roc_auc = []
+	# Gather all FPRs
+	all_fpr = np.unique(np.concatenate([fpr for i in range(n_classes)]))
+	avg_tpr = np.zeros_like(all_fpr)
+
+	# Compute the averages per class
+	for i in range(n_classes):
+		avg_tpr += np.interp(all_fpr, fpr, tpr)
+
+	# Finalize the average
+	avg_tpr /= n_classes
+
+	# Store the macro averages
+	fpr = all_fpr
+	tpr = avg_tpr
+	roc_auc = auc(fpr, tpr)
+	return fpr, tpr, roc_auc
+
+def score_micro_average_prec(y, y_pred, classes, n_classes):
+	"""
+	Compute the micro average scores for the ROCAUC curves.
+	"""
+
+	# Convert y to binarized array for micro and macro scores
+	y = label_binarize(y, classes=classes)
+	if n_classes == 2:
+		y = np.hstack((1 - y, y))
+
+	# Compute micro-average
+	prec, recall, _ = metrics.precision_recall_curve(y.ravel(), y_pred.ravel())
+	ave_prec = metrics.average_precision_score(y.ravel(), y_pred.ravel())
+	prec, recall = prec[::-1], recall[::-1]
+	prec_rec_auc = auc(recall, prec)
+	return prec, recall, prec_rec_auc,ave_prec
+
+def score_macro_average_prec(n_classes, prec_dict, recall_dict):
+	"""
+	Compute the macro average scores for the ROCAUC curves.
+	"""
+	prec = []
+	recall = []
+	roc_auc = []
+	# Gather all FPRs
+	all_fpr = np.unique(np.concatenate([fpr for i in range(n_classes)]))
+	avg_tpr = np.zeros_like(all_fpr)
+
+	# Compute the averages per class
+	for i in range(n_classes):
+		avg_tpr += np.interp(all_fpr, fpr, tpr)
+
+	# Finalize the average
+	avg_tpr /= n_classes
+
+	# Store the macro averages
+	fpr = all_fpr
+	tpr = avg_tpr
+	roc_auc = auc(self.fpr, self.tpr)
+	return fpr, tpr, roc_auc
 
 def hyper_eval(est, x_train, y_train, randSeed, hype_cv, params, scoring_metric):
 	cv = StratifiedKFold(n_splits=hype_cv, shuffle=True, random_state=randSeed)
@@ -386,7 +466,7 @@ def objective_LR(trial, est, x_train, y_train, randSeed, hype_cv, param_grid, sc
 	return hyper_eval(est, x_train, y_train, randSeed, hype_cv, params, scoring_metric)
 
 	
-def run_LR_full(x_train, y_train, x_test, y_test, n_classes, randSeed, i, param_grid, name_path, hype_cv, n_trials, scoring_metric,timeout,wd_path,output_folder,algorithm,data_name):
+def run_LR_full(x_train, y_train, x_test, y_test, randSeed, i, param_grid, name_path, hype_cv, n_trials, scoring_metric,timeout,wd_path,output_folder,algorithm,data_name, type_average="micro"):
 	#Run Hyperparameter sweep
 	est = LogisticRegression()
 	sampler = optuna.samplers.TPESampler(seed=randSeed)  # Make the sampler behave in a deterministic way.
@@ -423,25 +503,34 @@ def run_LR_full(x_train, y_train, x_test, y_test, n_classes, randSeed, i, param_
 	#Determine probabilities of class predictions for each test instance (this will be used much later in calculating an ROC curve)
 	probas_ = model.predict_proba(x_test)
 
-	# Compute ROC curve and AUC
-	fpr_dict = dict()
-	tpr_dict = dict()
-	roc_auc_dict = dict()
-	thresholds_dict = dict()
-	for i in range(n_classes):
-		fpr_dict[i], tpr_dict[i], thresholds_dict[i] = metrics.roc_curve(y_test, probas_[:, 1], pos_label=i)
-		roc_auc_dict[i] = auc(fpr_dict[i], tpr_dict[i])
-	print(fpr_dict)
-	print(tpr_dict)
-	print(roc_auc_dict)
-	fpr, tpr, thresholds = "todo","todo","todo"
-	roc_auc = auc(fpr, tpr)
+	classes = np.unique(y_train)
+	n_classes = len(classes)
 
-	# Compute Precision/Recall curve and AUC
-	prec, recall, thresholds = metrics.precision_recall_curve(y_test, probas_[:, 1])
-	prec, recall, thresholds = prec[::-1], recall[::-1], thresholds[::-1]
-	prec_rec_auc = auc(recall, prec)
-	ave_prec = metrics.average_precision_score(y_test, probas_[:, 1])
+	# ROC AUC FPR TPR - For Each Class
+	fpr_dict= dict()
+	tpr_dict = dict()
+	for i, c in enumerate(classes):
+		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
+	# Compute micro average
+	if type_average=="micro":
+		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
+	# Compute macro average
+	if type_average=="macro":
+		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+
+	# PRECISION RECALL - For each class
+	precision_dict = dict()
+	recall_dict = dict()
+	for i, c in enumerate(classes):
+		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
+															probas_[:, 1], pos_label=c)
+	# Compute micro average
+	if type_average=="micro":
+		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes)
+	# Compute macro average
+	if type_average=="macro":
+		prec, recall, prec_rec_auc, ave_prec = score_macro_average_prec(n_classes, precision_dict, recall_dict)
+
 
 	#Feature Importance Estimates
 	#fi = np.exp(clf.coef_[0]) Estimate from coeficients (potentially unreliable even with data scaling)
@@ -499,12 +588,12 @@ def run_DT_full(x_train, y_train, x_test, y_test,randSeed,i,param_grid,name_path
 	probas_ = model.predict_proba(x_test)
 
 	# Compute ROC curve and area the curve
-	fpr, tpr, thresholds = metrics.roc_curve(y_test, probas_[:, 1])
+	fpr, tpr, _ = metrics.roc_curve(y_test, probas_[:, 1])
 	roc_auc = auc(fpr, tpr)
 
 	# Compute Precision/Recall curve and AUC
-	prec, recall, thresholds = metrics.precision_recall_curve(y_test, probas_[:, 1])
-	prec, recall, thresholds = prec[::-1], recall[::-1], thresholds[::-1]
+	prec, recall = metrics.precision_recall_curve(y_test, probas_[:, 1])
+	prec, recall = prec[::-1], recall[::-1], 
 	prec_rec_auc = auc(recall, prec)
 	ave_prec = metrics.average_precision_score(y_test, probas_[:, 1])
 
