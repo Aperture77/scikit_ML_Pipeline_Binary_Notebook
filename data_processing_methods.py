@@ -110,8 +110,34 @@ def cv_partitioner(td, cv_partitions, partition_method, outcomeLabel, categorica
                 currPart = counter%cv_partitions
 
             header.pop(matchIndex) #remove match column from partition output
+
+    #Determinist Partitioning Method-----------------------
+    elif partition_method == 'D':
+        if categoricalOutcome:
+            #Get match variable column index
+            outcomeIndex = td.columns.get_loc(outcomeLabel)
+            matchIndex = td.columns.get_loc(matchName)
+
+            print("Determinist Partitioning")
+            #Create data sublists, each having all rows with the same match identifier
+            matchList = ["train", "test"]
+
+            byMatchRows = [ [] for i in range(len(matchList)) ] #create list of empty lists (one for each match group)
+            for row in datasetList:
+                #find index in matchList corresponding to the matchset of the current row. 
+                mIndex = matchList.index(row[matchIndex])
+                row.pop(matchIndex) #remove match column from partition output
+                byMatchRows[mIndex].append(row)
+
+            header.pop(matchIndex) #remove match column from partition output
+            train_dfs = []
+            test_dfs = []
+            train_dfs.append(pd.DataFrame(byMatchRows[0], columns = header))
+            test_dfs.append(pd.DataFrame(byMatchRows[1], columns = header))
+            return train_dfs, test_dfs 
+
         else: 
-            print("Error: Matched partitioning only designed for discrete endpoints. ")
+            print("Error: Determinist partitioning only designed for discrete endpoints. ")
             
     else:
         print('Error: Requested partition method not found.')

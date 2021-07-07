@@ -448,6 +448,7 @@ def run_LR_full(x_train, y_train, x_test, y_test, randSeed, i, param_grid, name_
 	sampler = optuna.samplers.TPESampler(seed=randSeed)  # Make the sampler behave in a deterministic way.
 	study = optuna.create_study(direction='maximize', sampler=sampler)
 	optuna.logging.set_verbosity(optuna.logging.CRITICAL)
+	n_trial = 0
 	study.optimize(lambda trial: objective_LR(trial,est, x_train, y_train, randSeed, hype_cv, param_grid, scoring_metric), n_trials=n_trials, timeout=timeout, catch=(ValueError,))
 
 	fig = optuna.visualization.plot_parallel_coordinate(study)
@@ -1480,7 +1481,7 @@ def run_ExSTraCS_full(x_train, y_train, x_test, y_test,randSeed,i,param_grid,nam
 
 	return metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi
 
-def run_ExSTraCS_QRF_full(x_test, y_test,i,name_path):
+def run_ExSTraCS_QRF_full(x_test, y_test,i,name_path, type_average="micro"):
 	file = open(name_path + str(i) + '.sav','rb')
 	clf = pickle.load(file)
 	file.close()
@@ -1498,15 +1499,31 @@ def run_ExSTraCS_QRF_full(x_test, y_test,i,name_path):
 	# Determine probabilities of class predictions for each test instance (this will be used much later in calculating an ROC curve)
 	probas_ = clf.predict_proba(x_test)
 
-	# Compute ROC curve and area the curve
-	fpr, tpr, thresholds = metrics.roc_curve(y_test, probas_[:, 1])
-	roc_auc = auc(fpr, tpr)
+	classes = np.unique(y_test)
+	n_classes = len(classes)
 
-	# Compute Precision/Recall curve and AUC
-	prec, recall, thresholds = metrics.precision_recall_curve(y_test, probas_[:, 1])
-	prec, recall, thresholds = prec[::-1], recall[::-1], thresholds[::-1]
-	prec_rec_auc = auc(recall, prec)
-	ave_prec = metrics.average_precision_score(y_test, probas_[:, 1])
+	# ROC AUC FPR TPR - For Each Class
+	fpr_dict= dict()
+	tpr_dict = dict()
+	for i, c in enumerate(classes):
+		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
+	# Compute micro average
+	if type_average=="micro":
+		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
+	# Compute macro average
+	if type_average=="macro":
+		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+
+	# PRECISION RECALL - For each class
+	precision_dict = dict()
+	recall_dict = dict()
+	for i, c in enumerate(classes):
+		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
+															probas_[:, 1], pos_label=c)
+	if type_average=="micro":
+		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
+	if type_average=="macro":
+		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
 
 	# Feature Importance Estimates
 	fi = clf.get_final_attribute_specificity_list()
