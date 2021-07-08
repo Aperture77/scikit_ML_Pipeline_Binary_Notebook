@@ -46,6 +46,9 @@ import plotly
 from scipy import interp
 from skrebate import ReliefF
 
+from rocauc import ROCAUC
+from prcurve import PrecisionRecallCurve
+
 #Import Progress bar:
 from tqdm import tnrange, tqdm_notebook
 
@@ -53,7 +56,6 @@ def classEval(y_true, y_pred, verbose = False):
 	#calculate and store evaluation metrics
 	list_confusion_array = multilabel_confusion_matrix(y_true, y_pred)
 	tn, fp, fn, tp = sum(list_confusion_array).ravel()
-
 	ac = accuracy_score(y_true, y_pred)
 	bac = balanced_accuracy_score(y_true, y_pred)
 	re = recall_score(y_true, y_pred, average="micro")
@@ -167,7 +169,7 @@ def eval_Algorithm_FI(algorithm,ordered_feature_names,xTrainList,yTrainList,xTes
 			metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi = run_ExSTraCS_full(xTrainList[i],yTrainList[i],xTestList[i],yTestList[i],randSeed,i,param_grid[algorithm],name_path,hype_cv,n_trials,scoring_metric,timeout,wd_path,output_folder,algorithm, data_name, type_average)
 		elif algorithm == 'ExSTraCS_QRF':
 			name_path = wd_path + model_folder + '/' + 'Model_' + 'ExSTraCS' + '_' + data_name + '_'
-			metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi = run_ExSTraCS_QRF_full(xTestList[i],yTestList[i],i,name_path, type_average)
+			metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi = run_ExSTraCS_QRF_full(xTrainList[i],yTrainList[i],xTestList[i],yTestList[i],i,name_path, type_average)
 		elif algorithm == 'gradient_boosting':
 			metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi = run_GB_full(xTrainList[i],yTrainList[i],xTestList[i],yTestList[i],randSeed, i,param_grid[algorithm],name_path,hype_cv,n_trials,scoring_metric,timeout,wd_path,output_folder,algorithm,data_name, type_average)
 		elif algorithm == 'k_neighbors':
@@ -364,48 +366,9 @@ def intersection(lst1, lst2):
 	lst3 = [value for value in lst1 if value in lst2]
 	return lst3
 
-def score_micro_average(y, y_pred, classes, n_classes):
-	"""
-	Compute the micro average scores for the ROCAUC curves.
-	"""
-
-	# Convert y to binarized array for micro and macro scores
-	y = label_binarize(y, classes=classes)
-	if n_classes == 2:
-		y = np.hstack((1 - y, y))
-
-	# Compute micro-average
-	fpr, tpr, _ = roc_curve(y.ravel(), y_pred.ravel())
-	roc_auc = auc(fpr, tpr)
-	return fpr, tpr, roc_auc
-
-def score_macro_average(n_classes, fpr_dict, tpr_dict):
-	"""
-	Compute the macro average scores for the ROCAUC curves.
-	"""
-	fpr = []
-	tpr = []
-	roc_auc = []
-	# Gather all FPRs
-	all_fpr = np.unique(np.concatenate([fpr_dict[i] for i in range(n_classes)]))
-	avg_tpr = np.zeros_like(all_fpr)
-
-	# Compute the averages per class
-	for i in range(n_classes):
-		avg_tpr += np.interp(all_fpr, fpr_dict[i], tpr_dict[i])
-
-	# Finalize the average
-	avg_tpr /= n_classes
-
-	# Store the macro averages
-	fpr = all_fpr
-	tpr = avg_tpr
-	roc_auc = auc(fpr, tpr)
-	return fpr, tpr, roc_auc
-
 def score_micro_average_prec(y, y_pred, classes, n_classes, type_average="micro"):
 	"""
-	Compute the micro average scores for the ROCAUC curves.
+	Compute the micro average scores for the PreRec curves.
 	"""
 
 	# Convert y to binarized array for micro and macro scores
@@ -444,6 +407,7 @@ def objective_LR(trial, est, x_train, y_train, randSeed, hype_cv, param_grid, sc
 	
 def run_LR_full(x_train, y_train, x_test, y_test, randSeed, i, param_grid, name_path, hype_cv, n_trials, scoring_metric,timeout,wd_path,output_folder,algorithm,data_name, type_average="micro"):
 	#Run Hyperparameter sweep
+
 	est = LogisticRegression()
 	sampler = optuna.samplers.TPESampler(seed=randSeed)  # Make the sampler behave in a deterministic way.
 	study = optuna.create_study(direction='maximize', sampler=sampler)
@@ -466,8 +430,8 @@ def run_LR_full(x_train, y_train, x_test, y_test, randSeed, i, param_grid, name_
 	est = LogisticRegression()
 	clf = clone(est).set_params(**best_trial.params)  
 	setattr(clf,'random_state',randSeed)
-
 	model = clf.fit(x_train, y_train)
+
 
 	#Save model
 	pickle.dump(model, open(name_path+str(i)+'.sav', 'wb'))
@@ -484,28 +448,24 @@ def run_LR_full(x_train, y_train, x_test, y_test, randSeed, i, param_grid, name_
 	n_classes = len(classes)
 
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(model, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
+	
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
-
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
+	
 
 	#Feature Importance Estimates
 	#fi = np.exp(clf.coef_[0]) Estimate from coeficients (potentially unreliable even with data scaling)
@@ -566,27 +526,22 @@ def run_DT_full(x_train, y_train, x_test, y_test,randSeed,i,param_grid,name_path
 	n_classes = len(classes)
 
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(model, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
 
 	#Feature Importance Estimates
 	fi = clf.feature_importances_
@@ -647,27 +602,22 @@ def run_RF_full(x_train, y_train, x_test, y_test,randSeed,i,param_grid,name_path
 	n_classes = len(classes)
 
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(model, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
 
 	#Feature Importance Estimates
 	fi = clf.feature_importances_
@@ -697,27 +647,22 @@ def run_NB_full(x_train, y_train, x_test, y_test,i,name_path, type_average="micr
 	n_classes = len(classes)
 
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(model, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
 
 	#Feature Importance Estimates
 	fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
@@ -750,7 +695,10 @@ def objective_XGB(trial, est, x_train, y_train, randSeed, hype_cv, param_grid, s
 
 def run_XGB_full(x_train, y_train, x_test, y_test,randSeed,i,param_grid,name_path, hype_cv, n_trials, scoring_metric,timeout,wd_path,output_folder,algorithm,data_name, type_average="micro"):
 	#Run Hyperparameter sweep
+	classes = np.unique(y_train)
+	n_classes = len(classes)
 	est = xgb.XGBClassifier()
+	est.n_classes_ = n_classes
 	sampler = optuna.samplers.TPESampler(seed=randSeed)  # Make the sampler behave in a deterministic way.
 	study = optuna.create_study(direction='maximize', sampler=sampler)
 	optuna.logging.set_verbosity(optuna.logging.CRITICAL)
@@ -785,31 +733,24 @@ def run_XGB_full(x_train, y_train, x_test, y_test,randSeed,i,param_grid,name_pat
 	#Determine probabilities of class predictions for each test instance (this will be used much later in calculating an ROC curve)
 	probas_ = model.predict_proba(x_test)
 
-	classes = np.unique(y_train)
-	n_classes = len(classes)
-
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(model, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
 
 	#Feature Importance Estimates
 	fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
@@ -875,16 +816,21 @@ def run_LGB_full(x_train, y_train, x_test, y_test,randSeed,i,param_grid,name_pat
 
 	#Determine probabilities of class predictions for each test instance (this will be used much later in calculating an ROC curve)
 	probas_ = model.predict_proba(x_test)
-
+	classes = np.unique(y_train)
+	n_classes = len(classes)
 	# Compute ROC curve and area the curve
 	fpr, tpr, thresholds = metrics.roc_curve(y_test, probas_[:, 1])
 	roc_auc = auc(fpr, tpr)
 
 	# Compute Precision/Recall curve and AUC
-	prec, recall, thresholds = metrics.precision_recall_curve(y_test, probas_[:, 1])
-	prec, recall, thresholds = prec[::-1], recall[::-1], thresholds[::-1]
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
 	prec_rec_auc = auc(recall, prec)
-	ave_prec = metrics.average_precision_score(y_test, probas_[:, 1])
 
 	#Feature Importance Estimates
 	fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
@@ -943,27 +889,22 @@ def run_SVM_full(x_train, y_train, x_test, y_test,randSeed,i,param_grid,name_pat
 	n_classes = len(classes)
 
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(model, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
 
 	#Feature Importance Estimates
 	fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
@@ -1024,27 +965,22 @@ def run_GB_full(x_train, y_train, x_test, y_test, randSeed, i, param_grid, name_
 	n_classes = len(classes)
 
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(model, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
 
 	# Feature Importance Estimates
 	fi = clf.feature_importances_
@@ -1099,27 +1035,22 @@ def run_KN_full(x_train, y_train, x_test, y_test, randSeed, i, param_grid, name_
 	n_classes = len(classes)
 
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(model, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
 
 	# Feature Importance Estimates
 	fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
@@ -1194,27 +1125,22 @@ def run_ANN_full(x_train, y_train, x_test, y_test,randSeed,i,param_grid,name_pat
 	n_classes = len(classes)
 
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(model, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
 
 	#Feature Importance Estimates
 	fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
@@ -1276,27 +1202,22 @@ def run_eLCS_full(x_train, y_train, x_test, y_test,randSeed,i,param_grid,name_pa
 	n_classes = len(classes)
 
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(model, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
 
 	# Feature Importance Estimates
 	fi = clf.get_final_attribute_specificity_list()
@@ -1357,27 +1278,22 @@ def run_XCS_full(x_train, y_train, x_test, y_test,randSeed,i,param_grid,name_pat
 	n_classes = len(classes)
 
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(model, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
 
 	# Feature Importance Estimates
 	fi = clf.get_final_attribute_specificity_list()
@@ -1454,34 +1370,29 @@ def run_ExSTraCS_full(x_train, y_train, x_test, y_test,randSeed,i,param_grid,nam
 	n_classes = len(classes)
 
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(model, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
+	viz = PrecisionRecallCurve(model, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
 
 	# Feature Importance Estimates
 	fi = clf.get_final_attribute_specificity_list()
 
 	return metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi
 
-def run_ExSTraCS_QRF_full(x_test, y_test,i,name_path, type_average="micro"):
+def run_ExSTraCS_QRF_full(x_train, y_train, x_test, y_test,i,name_path, type_average="micro"):
 	file = open(name_path + str(i) + '.sav','rb')
 	clf = pickle.load(file)
 	file.close()
@@ -1503,27 +1414,22 @@ def run_ExSTraCS_QRF_full(x_test, y_test,i,name_path, type_average="micro"):
 	n_classes = len(classes)
 
 	# ROC AUC FPR TPR - For Each Class
-	fpr_dict= dict()
-	tpr_dict = dict()
-	for i, c in enumerate(classes):
-		fpr_dict[i], tpr_dict[i], _ = metrics.roc_curve(y_test, probas_[:, 1], pos_label=c)
-	# Compute micro average
-	if type_average=="micro":
-		fpr, tpr, roc_auc = score_micro_average(y_test, probas_, classes, n_classes)
-	# Compute macro average
-	if type_average=="macro":
-		fpr, tpr, roc_auc = score_macro_average(n_classes, fpr_dict, tpr_dict)
+	visualizer = ROCAUC(clf, classes=classes)
+	visualizer.fit(x_train, y_train)        # Fit the training data to the visualizer
+	visualizer.score(x_test, y_test)        # Evaluate the model on the test data
+	tpr = visualizer.tpr[type_average]
+	fpr = visualizer.fpr[type_average]
+	roc_auc = visualizer.roc_auc[type_average]
 
 	# PRECISION RECALL - For each class
-	precision_dict = dict()
-	recall_dict = dict()
-	for i, c in enumerate(classes):
-		precision_dict[i], recall_dict[i], _ = precision_recall_curve(y_test,
-															probas_[:, 1], pos_label=c)
-	if type_average=="micro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="micro")
-	if type_average=="macro":
-		prec, recall, prec_rec_auc, ave_prec = score_micro_average_prec(y_test, probas_, classes, n_classes, type_average="macro")
+	viz = PrecisionRecallCurve(clf, classes=classes)
+	viz.fit(x_train, y_train)
+	viz.score(x_test, y_test)
+	prec = viz.precision_["micro"]
+	recall = viz.recall_["micro"]
+	prec, recall = prec[::-1], recall[::-1]
+	ave_prec = viz.score_["micro"]
+	prec_rec_auc = auc(recall, prec)
 
 	# Feature Importance Estimates
 	fi = clf.get_final_attribute_specificity_list()

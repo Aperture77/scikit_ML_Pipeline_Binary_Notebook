@@ -114,15 +114,15 @@ def cv_partitioner(td, cv_partitions, partition_method, outcomeLabel, categorica
     #Determinist Partitioning Method-----------------------
     elif partition_method == 'D':
         if categoricalOutcome:
-            #Get match variable column index
+            #Get train/test (match) variable column index
             outcomeIndex = td.columns.get_loc(outcomeLabel)
             matchIndex = td.columns.get_loc(matchName)
 
             print("Determinist Partitioning")
-            #Create data sublists, each having all rows with the same match identifier
+            #Create data sublists for train and test data
             matchList = ["train", "test"]
 
-            byMatchRows = [ [] for i in range(len(matchList)) ] #create list of empty lists (one for each match group)
+            byMatchRows = [ [] for i in range(len(matchList)) ] #create list of empty lists (one train one for test)
             for row in datasetList:
                 #find index in matchList corresponding to the matchset of the current row. 
                 mIndex = matchList.index(row[matchIndex])
