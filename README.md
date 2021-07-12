@@ -30,6 +30,10 @@ Additionally, while currently commented out in the file (modeling_methods.py) if
 
 Lastly, in order to include the stand-alone algorithm 'ExSTraCS' we needed to call this from the command line within this Jupyter Notebook.  As a result, the part of this notebook running ExSTraCS will only run properly if the path to the working directory used to run this notebook includes no spaces.  In other words if your path includes a folder called 'My Folder' vs. 'My_Folder' you will likely get a run error for ExSTraCS (at least on a Windows machine). Thus, make sure to check that wherever you are running this notebook from, that the entire path to the working directory does note include any spaces. 
 
+EDIT:  
+1. `conda env create -f environment.yml`
+2. `conda activate ML-pipeline`  
+
 ***
 ## Dataset Requirements
 This notebook loads a single dataset to be run through the entire pipeline. Here we summarize the requirements for this dataset:
