@@ -14,13 +14,11 @@ import copy
 
 # Scikit-Learn Packages:
 from sklearn.model_selection import StratifiedKFold, cross_val_score
-from sklearn.model_selection import GridSearchCV
 from sklearn.base import clone
 
 # import sklearn.model_selection
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import label_binarize
 from sklearn import tree
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
@@ -34,11 +32,10 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import balanced_accuracy_score
 from sklearn.metrics import recall_score
-from sklearn.metrics import confusion_matrix, multilabel_confusion_matrix
+from sklearn.metrics import multilabel_confusion_matrix
 from sklearn.metrics import precision_score
 from sklearn.metrics import f1_score
-from sklearn.metrics import roc_curve, auc, precision_recall_curve
-from sklearn import metrics
+from sklearn.metrics import auc
 
 import xgboost as xgb
 import lightgbm as lgb
@@ -46,13 +43,11 @@ import optuna  # hyperparameter optimization
 import plotly
 from numpy import interp
 from skrebate import ReliefF
-from yellowbrick.utils.helpers import is_fitted
 
-from rocauc import ROCAUC
-from prcurve import PrecisionRecallCurve
+from scoring_curve import score_roc_curve, score_precision_recall
 
 # Import Progress bar:
-from tqdm import tnrange, tqdm_notebook
+from tqdm import tqdm_notebook
 
 
 def classEval(y_true, y_pred, verbose=False):
@@ -168,7 +163,6 @@ def eval_Algorithm_FI(
     n_trials,
     scoring_metric,
     timeout,
-    type_average,
 ):
     alg_result_table = []
     # Define evaluation stats variable lists
@@ -203,7 +197,7 @@ def eval_Algorithm_FI(
     name_path = (
         wd_path + model_folder + "/" + "Model_" + algorithm + "_" + data_name + "_"
     )
-    for i in tqdm_notebook(range(cv_partitions), desc="1st loop"):
+    for i in tqdm_notebook(range(cv_partitions), desc="eval_Algorithm_FI"):
         # Algorithm Specific Code
         print("Running " + str(algorithm))
         if algorithm == "logistic_regression":
@@ -234,7 +228,6 @@ def eval_Algorithm_FI(
                 output_folder,
                 algorithm,
                 data_name,
-                type_average,
             )
         elif algorithm == "decision_tree":
             (
@@ -264,7 +257,6 @@ def eval_Algorithm_FI(
                 output_folder,
                 algorithm,
                 data_name,
-                type_average,
             )
         elif algorithm == "random_forest":
             (
@@ -294,7 +286,6 @@ def eval_Algorithm_FI(
                 output_folder,
                 algorithm,
                 data_name,
-                type_average,
             )
         elif algorithm == "naive_bayes":
             (
@@ -308,13 +299,7 @@ def eval_Algorithm_FI(
                 ave_prec,
                 fi,
             ) = run_NB_full(
-                xTrainList[i],
-                yTrainList[i],
-                xTestList[i],
-                yTestList[i],
-                i,
-                name_path,
-                type_average,
+                xTrainList[i], yTrainList[i], xTestList[i], yTestList[i], i, name_path,
             )
         elif algorithm == "XGB":
             (
@@ -344,7 +329,6 @@ def eval_Algorithm_FI(
                 output_folder,
                 algorithm,
                 data_name,
-                type_average,
             )
         elif algorithm == "LGB":
             (
@@ -374,7 +358,6 @@ def eval_Algorithm_FI(
                 output_folder,
                 algorithm,
                 data_name,
-                type_average,
             )
         elif algorithm == "ANN":
             (
@@ -404,7 +387,6 @@ def eval_Algorithm_FI(
                 output_folder,
                 algorithm,
                 data_name,
-                type_average,
             )
         elif algorithm == "SVM":
             (
@@ -434,7 +416,6 @@ def eval_Algorithm_FI(
                 output_folder,
                 algorithm,
                 data_name,
-                type_average,
             )
         elif algorithm == "eLCS":
             (
@@ -464,7 +445,6 @@ def eval_Algorithm_FI(
                 output_folder,
                 algorithm,
                 data_name,
-                type_average,
             )
         elif algorithm == "XCS":
             (
@@ -494,7 +474,6 @@ def eval_Algorithm_FI(
                 output_folder,
                 algorithm,
                 data_name,
-                type_average,
             )
         elif algorithm == "ExSTraCS":
             (
@@ -524,7 +503,6 @@ def eval_Algorithm_FI(
                 output_folder,
                 algorithm,
                 data_name,
-                type_average,
             )
         elif algorithm == "ExSTraCS_QRF":
             name_path = (
@@ -548,13 +526,7 @@ def eval_Algorithm_FI(
                 ave_prec,
                 fi,
             ) = run_ExSTraCS_QRF_full(
-                xTrainList[i],
-                yTrainList[i],
-                xTestList[i],
-                yTestList[i],
-                i,
-                name_path,
-                type_average,
+                xTrainList[i], yTrainList[i], xTestList[i], yTestList[i], i, name_path,
             )
         elif algorithm == "gradient_boosting":
             (
@@ -584,7 +556,6 @@ def eval_Algorithm_FI(
                 output_folder,
                 algorithm,
                 data_name,
-                type_average,
             )
         elif algorithm == "k_neighbors":
             (
@@ -614,7 +585,6 @@ def eval_Algorithm_FI(
                 output_folder,
                 algorithm,
                 data_name,
-                type_average,
             )
         else:
             print("Error: Algorithm not found!")
@@ -910,7 +880,7 @@ def computeImportances(clf, x_train, y_train, x_test, y_test, bac):
     feature_count = len(x_train[0])
     # print(feature_count)
     FIbAccList = []
-    for feature in tqdm_notebook(range(feature_count), desc="1st loop"):
+    for feature in tqdm_notebook(range(feature_count), desc="computeImportances"):
         indexList = []
         indexList.extend(range(0, feature))
         indexList.extend(range(feature + 1, feature_count))
@@ -921,12 +891,10 @@ def computeImportances(clf, x_train, y_train, x_test, y_test, bac):
 
         tempTest = pd.DataFrame(x_test)
         FIxTestList = tempTest.iloc[:, indexList].values
-
         clf.fit(FIxTrainList, y_train)
         FIyPred = clf.predict(FIxTestList)
 
         FIbAccList.append(balanced_accuracy_score(y_test, FIyPred))
-
     # Lower balanced accuracy metric values suggest higher feature importance
     featureImpList = []
     for element in FIbAccList:
@@ -952,7 +920,13 @@ def hyper_eval(est, x_train, y_train, randSeed, hype_cv, params, scoring_metric)
             setattr(model, a, randSeed)
     performance = np.mean(
         cross_val_score(
-            model, x_train, y_train, cv=cv, scoring=scoring_metric, error_score="raise"
+            model,
+            x_train,
+            y_train,
+            cv=cv,
+            scoring=scoring_metric,
+            # n_jobs=8,
+            error_score="raise",
         )
     )
     return performance
@@ -994,7 +968,6 @@ def run_LR_full(
     output_folder,
     algorithm,
     data_name,
-    type_average="micro",
 ):
     # Run Hyperparameter sweep
 
@@ -1045,33 +1018,18 @@ def run_LR_full(
 
     # Prediction evaluation
     y_pred = clf.predict(x_test)
-
     metricList = classEval(y_test, y_pred, False)
-
     classes = np.unique(y_train)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
-
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
     # Feature Importance Estimates
     # fi = np.exp(clf.coef_[0]) Estimate from coeficients (potentially unreliable even with data scaling)
     fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
-
     return metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi
 
 
@@ -1121,7 +1079,6 @@ def run_DT_full(
     output_folder,
     algorithm,
     data_name,
-    type_average="micro",
 ):
     # Run Hyperparameter sweep
     est = tree.DecisionTreeClassifier()
@@ -1174,27 +1131,14 @@ def run_DT_full(
     y_pred = clf.predict(x_test)
 
     metricList = classEval(y_test, y_pred, False)
-
     classes = np.unique(y_train)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
-
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
     # Feature Importance Estimates
     fi = clf.feature_importances_
 
@@ -1252,7 +1196,6 @@ def run_RF_full(
     output_folder,
     algorithm,
     data_name,
-    type_average="micro",
 ):
     # Run Hyperparameter sweep
     est = RandomForestClassifier()
@@ -1305,26 +1248,14 @@ def run_RF_full(
     y_pred = clf.predict(x_test)
 
     metricList = classEval(y_test, y_pred, False)
-
     classes = np.unique(y_train)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
 
     # Feature Importance Estimates
     fi = clf.feature_importances_
@@ -1332,7 +1263,7 @@ def run_RF_full(
     return metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi
 
 
-def run_NB_full(x_train, y_train, x_test, y_test, i, name_path, type_average="micro"):
+def run_NB_full(x_train, y_train, x_test, y_test, i, name_path):
     # No hyperparameters to optimize.
 
     # Train model using 'best' hyperparameters - Uses default 3-fold internal CV (training/validation splits)
@@ -1346,26 +1277,14 @@ def run_NB_full(x_train, y_train, x_test, y_test, i, name_path, type_average="mi
     y_pred = clf.predict(x_test)
 
     metricList = classEval(y_test, y_pred, False)
-
     classes = np.unique(y_train)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
 
     # Feature Importance Estimates
     fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
@@ -1427,6 +1346,7 @@ def objective_XGB(
             param_grid["colsample_bytree"][0],
             param_grid["colsample_bytree"][1],
         ),
+        "n_jobs": trial.suggest_categorical("n_jobs", param_grid["n_jobs"]),
         "scale_pos_weight": trial.suggest_categorical(
             "scale_pos_weight", [1.0, classWeight]
         ),
@@ -1451,7 +1371,6 @@ def run_XGB_full(
     output_folder,
     algorithm,
     data_name,
-    type_average="micro",
 ):
     # Run Hyperparameter sweep
     classes = np.unique(y_train)
@@ -1504,25 +1423,14 @@ def run_XGB_full(
     y_pred = clf.predict(x_test)
 
     metricList = classEval(y_test, y_pred, False)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
+    classes = np.unique(y_train)
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
 
     # Feature Importance Estimates
     fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
@@ -1576,6 +1484,7 @@ def objective_LGB(
         "n_estimators": trial.suggest_int(
             "n_estimators", param_grid["n_estimators"][0], param_grid["n_estimators"][1]
         ),
+        "n_jobs": trial.suggest_categorical("n_jobs", param_grid["n_jobs"]),
         "scale_pos_weight": trial.suggest_categorical(
             "scale_pos_weight", [1.0, classWeight]
         ),
@@ -1600,7 +1509,6 @@ def run_LGB_full(
     output_folder,
     algorithm,
     data_name,
-    type_average,
 ):
     # Run Hyperparameter sweep
     est = lgb.LGBMClassifier()
@@ -1653,26 +1561,14 @@ def run_LGB_full(
     y_pred = clf.predict(x_test)
 
     metricList = classEval(y_test, y_pred, False)
-
     classes = np.unique(y_train)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
 
     # Feature Importance Estimates
     fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
@@ -1717,7 +1613,6 @@ def run_SVM_full(
     output_folder,
     algorithm,
     data_name,
-    type_average="micro",
 ):
     # Run Hyperparameter sweep
     est = SVC()
@@ -1770,26 +1665,14 @@ def run_SVM_full(
     y_pred = clf.predict(x_test)
 
     metricList = classEval(y_test, y_pred, False)
-
     classes = np.unique(y_train)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
 
     # Feature Importance Estimates
     fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
@@ -1849,7 +1732,6 @@ def run_GB_full(
     output_folder,
     algorithm,
     data_name,
-    type_average="micro",
 ):
     # Run Hyperparameter sweep
     est = GradientBoostingClassifier()
@@ -1902,27 +1784,14 @@ def run_GB_full(
     y_pred = clf.predict(x_test)
 
     metricList = classEval(y_test, y_pred, False)
-
     classes = np.unique(y_train)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
-
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
     # Feature Importance Estimates
     fi = clf.feature_importances_
 
@@ -1939,6 +1808,7 @@ def objective_KN(
         "weights": trial.suggest_categorical("weights", param_grid["weights"]),
         "p": trial.suggest_int("p", param_grid["p"][0], param_grid["p"][1]),
         "metric": trial.suggest_categorical("metric", param_grid["metric"]),
+        "n_jobs": trial.suggest_categorical("n_jobs", param_grid["n_jobs"]),
     }
     return hyper_eval(est, x_train, y_train, randSeed, hype_cv, params, scoring_metric)
 
@@ -1960,7 +1830,6 @@ def run_KN_full(
     output_folder,
     algorithm,
     data_name,
-    type_average="micro",
 ):
     # Run Hyperparameter sweep
     est = KNeighborsClassifier()
@@ -2012,26 +1881,14 @@ def run_KN_full(
     y_pred = clf.predict(x_test)
 
     metricList = classEval(y_test, y_pred, False)
-
     classes = np.unique(y_train)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
 
     # Feature Importance Estimates
     fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
@@ -2070,7 +1927,6 @@ def objective_ANN(
             )
         )
         params["hidden_layer_sizes"] = tuple(layers)
-
     return hyper_eval(est, x_train, y_train, randSeed, hype_cv, params, scoring_metric)
 
 
@@ -2091,8 +1947,8 @@ def run_ANN_full(
     output_folder,
     algorithm,
     data_name,
-    type_average="micro",
 ):
+
     # Run Hyperparameter sweep
     est = MLPClassifier()
     sampler = optuna.samplers.TPESampler(
@@ -2102,7 +1958,7 @@ def run_ANN_full(
     optuna.logging.set_verbosity(optuna.logging.CRITICAL)
     study.optimize(
         lambda trial: objective_ANN(
-            trial, est, x_train, y_train, randSeed, hype_cv, param_grid, scoring_metric
+            trial, est, x_train, y_train, randSeed, hype_cv, param_grid, scoring_metric,
         ),
         n_trials=n_trials,
         timeout=timeout,
@@ -2145,38 +2001,22 @@ def run_ANN_full(
     setattr(clf, "random_state", randSeed)
 
     model = clf.fit(x_train, y_train)
-
     # Save model
     pickle.dump(model, open(name_path + str(i) + ".sav", "wb"))
 
     # Prediction evaluation
     y_pred = clf.predict(x_test)
-
     metricList = classEval(y_test, y_pred, False)
-
     classes = np.unique(y_train)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
-
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
     # Feature Importance Estimates
     fi = computeImportances(clf, x_train, y_train, x_test, y_test, metricList[0])
-
     return metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi
 
 
@@ -2210,7 +2050,6 @@ def run_eLCS_full(
     output_folder,
     algorithm,
     data_name,
-    type_average="micro",
 ):
     isSingle = True
     for key, value in param_grid.items():
@@ -2278,26 +2117,14 @@ def run_eLCS_full(
     y_pred = clf.predict(x_test)
 
     metricList = classEval(y_test, y_pred, False)
-
     classes = np.unique(y_train)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
 
     # Feature Importance Estimates
     fi = clf.get_final_attribute_specificity_list()
@@ -2335,7 +2162,6 @@ def run_XCS_full(
     output_folder,
     algorithm,
     data_name,
-    type_average="micro",
 ):
     isSingle = True
     for key, value in param_grid.items():
@@ -2402,26 +2228,14 @@ def run_XCS_full(
     y_pred = clf.predict(x_test)
 
     metricList = classEval(y_test, y_pred, False)
-
     classes = np.unique(y_train)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
 
     # Feature Importance Estimates
     fi = clf.get_final_attribute_specificity_list()
@@ -2459,7 +2273,6 @@ def run_ExSTraCS_full(
     output_folder,
     algorithm,
     data_name,
-    type_average="micro",
 ):
     isSingle = True
     for key, value in param_grid.items():
@@ -2544,26 +2357,14 @@ def run_ExSTraCS_full(
     y_pred = clf.predict(x_test)
 
     metricList = classEval(y_test, y_pred, False)
-
     classes = np.unique(y_train)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(model, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(model, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
+    probas_ = model.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
 
     # Feature Importance Estimates
     fi = clf.get_final_attribute_specificity_list()
@@ -2571,9 +2372,7 @@ def run_ExSTraCS_full(
     return metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi
 
 
-def run_ExSTraCS_QRF_full(
-    x_train, y_train, x_test, y_test, i, name_path, type_average="micro"
-):
+def run_ExSTraCS_QRF_full(x_train, y_train, x_test, y_test, i, name_path):
     file = open(name_path + str(i) + ".sav", "rb")
     clf = pickle.load(file)
     file.close()
@@ -2587,29 +2386,16 @@ def run_ExSTraCS_QRF_full(
     y_pred = clf.predict(x_test)
 
     metricList = classEval(y_test, y_pred, False)
-
-    classes = np.unique(y_test)
-
-    # ROC AUC FPR TPR - For Each Class
-    visualizer = ROCAUC(clf, classes=classes)
-    visualizer.fit(x_train, y_train)  # Fit the training data to the visualizer
-    visualizer.score(x_test, y_test)  # Evaluate the model on the test data
-    tpr = visualizer.tpr[type_average]
-    fpr = visualizer.fpr[type_average]
-    roc_auc = visualizer.roc_auc[type_average]
-
-    # PRECISION RECALL - For each class
-    viz = PrecisionRecallCurve(clf, classes=classes)
-    viz.fit(x_train, y_train)
-    viz.score(x_test, y_test)
-    prec = viz.precision_["micro"]
-    recall = viz.recall_["micro"]
-    prec, recall = prec[::-1], recall[::-1]
-    ave_prec = viz.score_["micro"]
-    prec_rec_auc = auc(recall, prec)
+    classes = np.unique(y_train)
+    probas_ = clf.predict_proba(x_test)
+    # ROC Auc TPR FPR Micro-averaged
+    fpr, tpr, roc_auc = score_roc_curve(y_test, probas_, classes)
+    # Precision Recall AUC Micro-averaged
+    prec, recall, prec_rec_auc, ave_prec = score_precision_recall(
+        y_test, probas_, classes
+    )
 
     # Feature Importance Estimates
     fi = clf.get_final_attribute_specificity_list()
 
     return metricList, fpr, tpr, roc_auc, prec, recall, prec_rec_auc, ave_prec, fi
-

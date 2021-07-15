@@ -33,6 +33,7 @@ Lastly, in order to include the stand-alone algorithm 'ExSTraCS' we needed to ca
 EDIT:  
 1. `conda env create -f environment.yml`
 2. `conda activate ML-pipeline`  
+3. `nohup jupyter nbconvert --to html --execute Supervised_Classification_ML_Pipeline.ipynb  &`
 
 ***
 ## Dataset Requirements
