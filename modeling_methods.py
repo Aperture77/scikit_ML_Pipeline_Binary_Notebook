@@ -2333,18 +2333,20 @@ def run_ExSTraCS_full(
     setattr(clf, "rule_compaction", None)
 
     # SET EXPERT Knowledge
-    rbSample = np.random.choice(
-        x_train.shape[0], min(2000, x_train.shape[0]), replace=False
-    )
-    newL = []
-    for r in rbSample:
-        newL.append(x_train[r])
-    newL = np.array(newL)
-    dataFeaturesR = np.delete(newL, -1, axis=1)
-    dataPhenotypesR = newL[:, -1]
+    # TO-DO: Not sure what this code is fort, create errors ?
+    # rbSample = np.random.choice(
+    #    x_train.shape[0], min(2000, x_train.shape[0]), replace=False
+    # )
+    # newL = []
+    # for r in rbSample:
+    #    newL.append(x_train[r])
+    # newL = np.array(newL)
+    # dataFeaturesR = np.delete(newL, -1, axis=1)
+    # dataPhenotypesR = newL[:, -1]
 
     relieff = ReliefF()
-    relieff.fit(dataFeaturesR, dataPhenotypesR)
+    # relieff.fit(dataFeaturesR, dataPhenotypesR)
+    relieff.fit(x_train, y_train)
     scores = relieff.feature_importances_
     setattr(clf, "expertKnowledge", scores)
 
